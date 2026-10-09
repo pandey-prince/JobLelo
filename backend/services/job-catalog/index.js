@@ -13,6 +13,8 @@ export {
   invalidateCatalog,
   getCatalogCacheStats,
   clearCatalogCache,
+  memoizeOnCatalog,
+  memoizeOnCatalogAsync,
   createCatalogService,
   filterCatalogByKeyword,
   normalizeKeyword,

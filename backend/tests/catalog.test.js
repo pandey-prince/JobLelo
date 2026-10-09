@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import mongoose from "mongoose";
+import { silent, oid, raw, fixtures, hiddenSource } from "./helpers/fixtures.js";
 import {
   buildCatalog,
   mapScrapedJobForList,
@@ -14,51 +15,6 @@ import {
 } from "../services/job-catalog/catalogCache.service.js";
 import { filterItJobs } from "../utils/itJobFilter.js";
 import { filterIndiaJobs } from "../utils/indiaJobFilter.js";
-
-const silent = { warn() {}, log() {}, error() {} };
-const oid = () => new mongoose.Types.ObjectId();
-const sourceA = oid();
-const sourceB = oid();
-const hiddenSource = oid();
-
-let seq = 0;
-const raw = (overrides = {}) => {
-  seq += 1;
-  return {
-    _id: oid(),
-    title: `Software Engineer ${seq}`,
-    description: "<p>Build <b>backend</b> services with Node.js and MongoDB.</p>",
-    location: "Bengaluru, India",
-    jobType: "Full-time",
-    salary: "Not disclosed",
-    requirements: ["Node.js", "MongoDB"],
-    applicationUrl: `https://careers.example.com/job/${seq}`,
-    companyName: "Acme",
-    companyLogo: "",
-    firstSeenAt: new Date(Date.now() - seq * 60_000),
-    status: "active",
-    source: sourceA,
-    ...overrides,
-  };
-};
-
-const fixtures = () => {
-  seq = 0;
-  return [
-    raw({ title: "Software Engineer - React", companyName: "Acme", location: "Hyderabad, India" }),
-    raw({ title: "Backend Developer", companyName: "Globex", location: "Pune, India", source: sourceB }),
-    raw({ title: "Data Engineer", companyName: "Initech", location: "Noida, India", description: "x".repeat(900) + " kubernetes-secret-word" }),
-    raw({ title: "C++ Developer", companyName: "Umbrella", location: "Chennai, India" }),
-    // dropped: not IT
-    raw({ title: "Sales Manager", companyName: "Acme", location: "Mumbai, India", description: "Sell things." }),
-    // dropped: not India
-    raw({ title: "Software Engineer", companyName: "Foreign Inc", location: "Berlin, Germany" }),
-    // dropped: hidden source
-    raw({ title: "Software Engineer Hidden", companyName: "Ghost", location: "Pune, India", source: hiddenSource }),
-    // duplicate (same company+title) -> older one dropped by dedupe
-    raw({ title: "Backend Developer", companyName: "Globex", location: "Pune, India", source: sourceB, applicationUrl: "https://careers.example.com/dup" }),
-  ];
-};
 
 test("buildCatalog applies IT/India/hidden/dedupe filters and keeps searchIndex aligned", () => {
   const docs = fixtures();

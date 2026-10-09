@@ -10,7 +10,13 @@ import {
   detectScraperType,
   extractCompanySlugFromUrl,
 } from "../services/scrapers/index.js";
-import { mapScrapedJobForList, dedupeScrapedJobs, getScrapedJobsForList } from "../services/job-catalog/index.js";
+import {
+  mapScrapedJobForList,
+  dedupeScrapedJobs,
+  getCatalog,
+  filterCatalogByKeyword,
+  memoizeOnCatalogAsync,
+} from "../services/job-catalog/index.js";
 import { escapeRegex, sanitizeSearchTerm } from "../utils/searchTerm.js";
 import { filterItJobs } from "../utils/itJobFilter.js";
 import { filterIndiaJobs } from "../utils/indiaJobFilter.js";
@@ -35,6 +41,82 @@ const parseTruthyQuery = (value) => {
 };
 
 const companyGroupKey = (name = "") => String(name).trim().toLowerCase();
+
+// Source metadata (careers URL, last scrape) is re-read at most once per this window.
+const PUBLIC_COMPANIES_TTL_MS = 60 * 1000;
+
+const groupJobsByCompany = (jobs) => {
+  const groups = new Map();
+
+  for (const job of jobs) {
+    const companyName = String(job?.company?.name || "").trim();
+    if (!companyName) continue;
+    const key = companyGroupKey(companyName);
+    if (!groups.has(key)) {
+      groups.set(key, {
+        companyName,
+        slug: slugifyCompanyName(companyName),
+        jobs: [],
+      });
+    }
+    groups.get(key).jobs.push(job);
+  }
+
+  return Array.from(groups.values())
+    .map((group) => ({ ...group, activeJobCount: group.jobs.length }))
+    .filter((group) => group.activeJobCount > 0)
+    .sort((a, b) => a.companyName.localeCompare(b.companyName));
+};
+
+const loadPublicSourceMap = async () => {
+  const sourceDocs = await JobSource.find({ isPublic: true, isActive: true })
+    .select("companyName name url lastScrapedAt lastScrapeStatus")
+    .lean();
+
+  const sourceBySlug = new Map();
+  for (const source of sourceDocs) {
+    const name = source.companyName || source.name || "";
+    const slug = slugifyCompanyName(name);
+    if (slug) sourceBySlug.set(slug, source);
+  }
+  return sourceBySlug;
+};
+
+/** Company cards (with their jobs) for the public companies page. Treat the result as read-only. */
+const buildPublicCompanies = async (catalog, jobs, search) => {
+  let companies = groupJobsByCompany(jobs);
+
+  if (search) {
+    const needle = search.toLowerCase();
+    companies = companies.filter((company) =>
+      company.companyName.toLowerCase().includes(needle),
+    );
+  }
+
+  // Attach careers URL from JobSource when available (cached briefly, tied to the catalog version)
+  const sourceBySlug = await memoizeOnCatalogAsync(
+    "companies:public:sources",
+    catalog,
+    loadPublicSourceMap,
+    { ttlMs: PUBLIC_COMPANIES_TTL_MS },
+  );
+
+  return companies.map((company) => {
+    const source = sourceBySlug.get(company.slug);
+    return {
+      _id: source?._id || company.slug,
+      companyName: company.companyName,
+      name: source?.name || company.companyName,
+      url: source?.url || "",
+      lastScrapedAt: source?.lastScrapedAt || null,
+      lastScrapeStatus: source?.lastScrapeStatus || "",
+      slug: company.slug,
+      activeJobCount: company.activeJobCount,
+      jobs: company.jobs,
+    };
+  });
+};
+
 
 export const getCompanySourceJobs = async (req, res) => {
   try {
@@ -118,68 +200,26 @@ export const listPublicSources = async (req, res) => {
     });
 
     if (withJobs) {
-      // Build from the same job catalog the Jobs page uses so counts always match live openings.
-      const catalogJobs = await getScrapedJobsForList(search);
-      const groups = new Map();
+      // Built from the same cached job catalog the Jobs page uses so counts always match live openings.
+      const catalog = await getCatalog();
 
-      for (const job of catalogJobs) {
-        const companyName = String(job?.company?.name || "").trim();
-        if (!companyName) continue;
-        const key = companyGroupKey(companyName);
-        if (!groups.has(key)) {
-          groups.set(key, {
-            companyName,
-            slug: slugifyCompanyName(companyName),
-            jobs: [],
-          });
-        }
-        groups.get(key).jobs.push(job);
-      }
-
-      let companies = Array.from(groups.values())
-        .map((group) => ({
-          ...group,
-          activeJobCount: group.jobs.length,
-        }))
-        .filter((group) => group.activeJobCount > 0)
-        .sort((a, b) => a.companyName.localeCompare(b.companyName));
-
+      let companies;
       if (search) {
-        const needle = search.toLowerCase();
-        companies = companies.filter((company) =>
-          company.companyName.toLowerCase().includes(needle),
+        // Searches vary per request: compute from the cached list (no DB work).
+        companies = await buildPublicCompanies(
+          catalog,
+          filterCatalogByKeyword(catalog, search),
+          search,
+        );
+      } else {
+        // The common case (no search) is memoised per catalog version.
+        companies = await memoizeOnCatalogAsync(
+          "companies:public:all",
+          catalog,
+          () => buildPublicCompanies(catalog, catalog.jobs, ""),
+          { ttlMs: PUBLIC_COMPANIES_TTL_MS },
         );
       }
-
-      // Attach careers URL from JobSource when available
-      const sourceDocs = await JobSource.find({
-        isPublic: true,
-        isActive: true,
-      })
-        .select("companyName name url lastScrapedAt lastScrapeStatus")
-        .lean();
-
-      const sourceBySlug = new Map();
-      for (const source of sourceDocs) {
-        const name = source.companyName || source.name || "";
-        const slug = slugifyCompanyName(name);
-        if (slug) sourceBySlug.set(slug, source);
-      }
-
-      companies = companies.map((company) => {
-        const source = sourceBySlug.get(company.slug);
-        return {
-          _id: source?._id || company.slug,
-          companyName: company.companyName,
-          name: source?.name || company.companyName,
-          url: source?.url || "",
-          lastScrapedAt: source?.lastScrapedAt || null,
-          lastScrapeStatus: source?.lastScrapeStatus || "",
-          slug: company.slug,
-          activeJobCount: company.activeJobCount,
-          jobs: company.jobs,
-        };
-      });
 
       const { data: sources, pagination } = paginateArray(companies, {
         page,

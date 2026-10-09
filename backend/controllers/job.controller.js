@@ -1,8 +1,10 @@
 import { Job } from "../models/job.model.js";
 import {
   fetchExternalJobById,
+  getCatalog,
   getScrapedJobsForList,
   isExternalJobId,
+  memoizeOnCatalog,
 } from "../services/job-catalog/index.js";
 import { parseJobListFilters, filterJobList, sortJobList } from "../utils/jobListFilters.js";
 import { recommendJobs } from "../utils/jobRecommendation.js";
@@ -156,15 +158,22 @@ export const getRecommendedJobs = async (req, res) => {
       profile = user?.profile || {};
     }
 
-    const scrapedJobs = await getScrapedJobsForList("");
-    const jobs = recommendJobs(scrapedJobs, profile, { limit });
+    const personalized = Boolean(
+      (profile.skills?.length || 0) > 0 || (profile.preferredJobRoles?.length || 0) > 0,
+    );
+
+    const catalog = await getCatalog();
+    // Guests / empty profiles all get the same result, so memoise it per catalog version.
+    const jobs = personalized
+      ? recommendJobs(catalog.jobs, profile, { limit })
+      : memoizeOnCatalog(`recommended:guest:${limit}`, catalog, () =>
+          recommendJobs(catalog.jobs, {}, { limit }),
+        );
 
     return res.status(200).json({
       success: true,
       jobs,
-      personalized: Boolean(
-        (profile.skills?.length || 0) > 0 || (profile.preferredJobRoles?.length || 0) > 0,
-      ),
+      personalized,
     });
   } catch (err) {
     console.log(err);

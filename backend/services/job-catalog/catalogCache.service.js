@@ -1,4 +1,4 @@
-import { createCache, deepFreeze, envMs } from "../../utils/memoryCache.js";
+import { createCache, createDerivedMemo, deepFreeze, envMs } from "../../utils/memoryCache.js";
 import { loadCatalogFromDb } from "./jobMapper.service.js";
 
 /**
@@ -66,6 +66,21 @@ export const createCatalogService = ({
     logger,
     ...(now ? { now } : {}),
   });
+
+  // Data derived from the catalog (stats, company groups, guest recommendations).
+  // Entries are keyed by catalog.version, so they refresh whenever the catalog does.
+  const derived = createDerivedMemo({ max: 100 });
+
+  /**
+   * memoizeOnCatalog(key, catalog, compute, { ttlMs }) — result is reused while
+   * the catalog version is unchanged (and within ttlMs, if given).
+   * With the cache disabled (version 0) it always recomputes.
+   */
+  const memoizeOnCatalog = (key, catalog, compute, options) =>
+    catalog.version ? derived.get(key, catalog.version, compute, options) : compute();
+
+  const memoizeOnCatalogAsync = (key, catalog, compute, options) =>
+    catalog.version ? derived.getAsync(key, catalog.version, compute, options) : compute();
 
   let everLoaded = false;
   let rewarmTimer = null;
@@ -145,6 +160,7 @@ export const createCatalogService = ({
   const clearCatalogCache = () => {
     clearTimeout(rewarmTimer);
     cache.clear();
+    derived.clear();
   };
 
   return {
@@ -154,6 +170,8 @@ export const createCatalogService = ({
     invalidateCatalog,
     getCatalogCacheStats,
     clearCatalogCache,
+    memoizeOnCatalog,
+    memoizeOnCatalogAsync,
   };
 };
 
@@ -166,3 +184,5 @@ export const warmCatalog = defaultService.warmCatalog;
 export const invalidateCatalog = defaultService.invalidateCatalog;
 export const getCatalogCacheStats = defaultService.getCatalogCacheStats;
 export const clearCatalogCache = defaultService.clearCatalogCache;
+export const memoizeOnCatalog = defaultService.memoizeOnCatalog;
+export const memoizeOnCatalogAsync = defaultService.memoizeOnCatalogAsync;

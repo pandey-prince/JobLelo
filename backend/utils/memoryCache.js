@@ -227,39 +227,47 @@ export const createCache = ({
  */
 export const createDerivedMemo = ({ max = 200, now = () => Date.now() } = {}) => {
   const store = new LRUCache({ max });
+  const inflight = new Map(); // `${key}@${version}` -> Promise
+
+  const fresh = (entry, version, ttlMs) =>
+    entry && entry.version === version && (!ttlMs || now() - entry.at < ttlMs);
 
   const get = (key, version, compute, { ttlMs } = {}) => {
     const entry = store.get(key);
-    if (
-      entry &&
-      entry.version === version &&
-      (!ttlMs || now() - entry.at < ttlMs)
-    ) {
-      return entry.value;
-    }
+    if (fresh(entry, version, ttlMs)) return entry.value;
     const value = compute();
     store.set(key, { version, value, at: now() });
     return value;
   };
 
+  // Concurrent callers for the same key+version share one compute() call.
   const getAsync = async (key, version, compute, { ttlMs } = {}) => {
     const entry = store.get(key);
-    if (
-      entry &&
-      entry.version === version &&
-      (!ttlMs || now() - entry.at < ttlMs)
-    ) {
-      return entry.value;
-    }
-    const value = await compute();
-    store.set(key, { version, value, at: now() });
-    return value;
+    if (fresh(entry, version, ttlMs)) return entry.value;
+
+    const flightKey = `${key}@${version}`;
+    if (inflight.has(flightKey)) return inflight.get(flightKey);
+
+    const promise = (async () => {
+      try {
+        const value = await compute();
+        store.set(key, { version, value, at: now() });
+        return value;
+      } finally {
+        inflight.delete(flightKey);
+      }
+    })();
+    inflight.set(flightKey, promise);
+    return promise;
   };
 
   return {
     get,
     getAsync,
-    clear: () => store.clear(),
+    clear: () => {
+      store.clear();
+      inflight.clear();
+    },
     size: () => store.size,
   };
 };
