@@ -19,7 +19,8 @@
     "sync:health": "node scripts/source-health.js",
     "seed:admin": "node scripts/seed-admin.js",
     "import:sources": "node scripts/import-career-sources.js",
-    "benchmark:catalog": "node scripts/benchmark-catalog.js"
+    "benchmark:catalog": "node scripts/benchmark-catalog.js",
+    "test:cache": "node --test \"tests/**/*.test.js\""
   },
   "keywords": [],
   "author": "",
