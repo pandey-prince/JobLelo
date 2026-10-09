@@ -6,6 +6,7 @@ import {
 } from "../services/job-catalog/index.js";
 import { parseJobListFilters, filterJobList, sortJobList } from "../utils/jobListFilters.js";
 import { recommendJobs } from "../utils/jobRecommendation.js";
+import { sanitizeSearchTerm } from "../utils/searchTerm.js";
 import { User } from "../models/user.model.js";
 import { DismissedJob } from "../models/dismissedJob.model.js";
 import {
@@ -75,7 +76,7 @@ export const postJob = async (req, res) => {
 
 export const getAllJobs = async (req, res) => {
   try {
-    const keyword = String(req.query.keyword || "").trim();
+    const keyword = sanitizeSearchTerm(req.query.keyword);
     const filters = parseJobListFilters(req.query);
     const paginationQuery = parsePagination(req.query, {
       defaultLimit: 30,

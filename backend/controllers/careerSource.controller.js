@@ -11,6 +11,7 @@ import {
   extractCompanySlugFromUrl,
 } from "../services/scrapers/index.js";
 import { mapScrapedJobForList, dedupeScrapedJobs, getScrapedJobsForList } from "../services/job-catalog/index.js";
+import { escapeRegex, sanitizeSearchTerm } from "../utils/searchTerm.js";
 import { filterItJobs } from "../utils/itJobFilter.js";
 import { filterIndiaJobs } from "../utils/indiaJobFilter.js";
 import {
@@ -55,7 +56,7 @@ export const getCompanySourceJobs = async (req, res) => {
       });
     }
 
-    const keyword = String(req.query.keyword || "").trim();
+    const keyword = sanitizeSearchTerm(req.query.keyword);
     const filters = parseJobListFilters(req.query);
     const paginationQuery = parsePagination(req.query, {
       defaultLimit: 12,
@@ -64,7 +65,7 @@ export const getCompanySourceJobs = async (req, res) => {
 
     const query = { source: source._id, status: "active" };
     if (keyword) {
-      const regex = { $regex: keyword, $options: "i" };
+      const regex = { $regex: escapeRegex(keyword), $options: "i" };
       query.$or = [
         { title: regex },
         { description: regex },
@@ -109,7 +110,7 @@ export const getCompanySourceJobs = async (req, res) => {
 
 export const listPublicSources = async (req, res) => {
   try {
-    const search = String(req.query.search || req.query.keyword || "").trim();
+    const search = sanitizeSearchTerm(req.query.search || req.query.keyword);
     const withJobs = parseTruthyQuery(req.query.withJobs);
     const { page, limit, skip } = parsePagination(req.query, {
       defaultLimit: 20,
@@ -195,7 +196,7 @@ export const listPublicSources = async (req, res) => {
 
     const query = { isPublic: true };
     if (search) {
-      const regex = { $regex: search, $options: "i" };
+      const regex = { $regex: escapeRegex(search), $options: "i" };
       query.$or = [{ companyName: regex }, { name: regex }];
     }
 
@@ -566,7 +567,7 @@ export const getUserCompanyListJobs = async (req, res) => {
   try {
     const userId = req.id;
     const listType = req.query.type || "watchlist";
-    const keyword = req.query.keyword || "";
+    const keyword = sanitizeSearchTerm(req.query.keyword);
     const { page, limit, skip } = parsePagination(req.query, {
       defaultLimit: 8,
       maxLimit: 24,
@@ -594,7 +595,7 @@ export const getUserCompanyListJobs = async (req, res) => {
 
     const query = { source: { $in: sourceIds }, status: "active" };
     if (keyword) {
-      const regex = { $regex: keyword, $options: "i" };
+      const regex = { $regex: escapeRegex(keyword), $options: "i" };
       query.$or = [
         { title: regex },
         { description: regex },

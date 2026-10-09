@@ -26,6 +26,7 @@ import { User } from "./models/user.model.js";
 import { isEmailConfigured } from "./services/email.service.js";
 import { ensureAdminFromEnv } from "./utils/ensureAdmin.js";
 import { apiLimiter } from "./middlewares/rateLimiter.js";
+import { warmCatalog } from "./services/job-catalog/index.js";
 dotenv.config({});
 const app = express();
 const __filename = fileURLToPath(import.meta.url);
@@ -130,6 +131,11 @@ app.listen(PORT, async () => {
   );
   await seedDefaultJobSources();
   await ensureAdminFromEnv();
+  // Warm the job catalog cache in the background so the first visitor after a
+  // deploy/restart gets a cache hit. Never blocks startup; failures are non-fatal.
+  warmCatalog().catch((error) => {
+    console.warn("[Catalog] warm-up failed (will load on first request):", error.message);
+  });
   startScrapeScheduler();
   startAlertScheduler();
   startLinkCheckScheduler();

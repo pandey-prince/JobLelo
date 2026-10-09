@@ -25,10 +25,11 @@ import {
   resolveExperienceLevel,
 } from "../utils/jobText.js";
 import { toPublicApplicationUrl } from "../utils/applicationUrl.js";
+import { sanitizeSearchTerm } from "../utils/searchTerm.js";
 
 export const listScrapedJobs = async (req, res) => {
   try {
-    const keyword = req.query.keyword || "";
+    const keyword = sanitizeSearchTerm(req.query.keyword);
     const jobs = await getScrapedJobsForList(keyword);
 
     res.status(200).json({

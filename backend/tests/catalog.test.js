@@ -228,3 +228,16 @@ test("service: a loader returning an invalid shape is rejected and not cached", 
   await assert.rejects(() => service.getScrapedJobsForList(""), /invalid result/);
   assert.equal((await service.getScrapedJobsForList("")).length, buildCatalog(fixtures(), []).jobs.length);
 });
+
+test("search term helpers: escapeRegex makes special characters literal; sanitize bounds input", async () => {
+  const { escapeRegex, sanitizeSearchTerm, MAX_SEARCH_TERM_LENGTH } = await import("../utils/searchTerm.js");
+  for (const term of ["c++", "(a+)+$", ".*", "[x", "a|b", "back\\slash"]) {
+    const re = new RegExp(escapeRegex(term), "i");
+    assert.ok(re.test(`prefix ${term} suffix`), `matches literal ${term}`);
+  }
+  assert.equal(new RegExp(escapeRegex(".*")).test("anything"), false);
+  assert.equal(sanitizeSearchTerm("  react  "), "react");
+  assert.equal(sanitizeSearchTerm(undefined), "");
+  assert.equal(sanitizeSearchTerm(["a", "b"]), "a,b");
+  assert.equal(sanitizeSearchTerm("x".repeat(500)).length, MAX_SEARCH_TERM_LENGTH);
+});
