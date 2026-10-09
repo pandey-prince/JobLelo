@@ -139,10 +139,25 @@ export const createCatalogService = ({
    * source CRUD). Debounced rewarm so a burst of invalidations triggers one load.
    */
   const invalidateCatalog = (reason = "unspecified") => {
-    cache.invalidate(CATALOG_KEY);
-    logger.log?.(`[Catalog] invalidated (${reason})`);
+    const hadEntry = cache.invalidate(CATALOG_KEY);
+    derived.clear();
+    // Stay quiet in script/cron processes that never loaded the catalog.
+    if (hadEntry || everLoaded) logger.log?.(`[Catalog] invalidated (${reason})`);
     scheduleRewarm();
   };
+
+  /**
+   * Wrap an async writer so the catalog is invalidated when it finishes, even if
+   * it throws (partial writes may already have happened).
+   */
+  const withCatalogInvalidation = (reason, fn) =>
+    async function wrapped(...args) {
+      try {
+        return await fn.apply(this, args);
+      } finally {
+        invalidateCatalog(reason);
+      }
+    };
 
   const getCatalogCacheStats = () => {
     const stats = cache.getStats();
@@ -172,6 +187,7 @@ export const createCatalogService = ({
     clearCatalogCache,
     memoizeOnCatalog,
     memoizeOnCatalogAsync,
+    withCatalogInvalidation,
   };
 };
 
@@ -186,3 +202,4 @@ export const getCatalogCacheStats = defaultService.getCatalogCacheStats;
 export const clearCatalogCache = defaultService.clearCatalogCache;
 export const memoizeOnCatalog = defaultService.memoizeOnCatalog;
 export const memoizeOnCatalogAsync = defaultService.memoizeOnCatalogAsync;
+export const withCatalogInvalidation = defaultService.withCatalogInvalidation;

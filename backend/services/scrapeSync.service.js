@@ -7,6 +7,7 @@ import { processWatchlistAlerts } from "./watchlistAlert.service.js";
 import { hardDeleteScrapedJob, hardDeleteScrapedJobsByQuery } from "./scrapedJobCleanup.service.js";
 import { checkActiveJobLinks } from "./linkCheck.service.js";
 import { dedupeScrapedJobs } from "./job-catalog/index.js";
+import { withCatalogInvalidation } from "./job-catalog/index.js";
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -332,7 +333,7 @@ const runSyncLoop = async (sources) => {
   return { results, removedFromBoard };
 };
 
-export const syncSourcesByMode = async (mode = "all", options = {}) => {
+const syncSourcesByModeImpl = async (mode = "all", options = {}) => {
   const {
     runPostSyncTasks = mode !== "puppeteer",
     bucketIndex,
@@ -419,7 +420,7 @@ export const syncSourcesByMode = async (mode = "all", options = {}) => {
 
 export const syncAllSources = async () => syncSourcesByMode("all");
 
-export const syncSourceById = async (sourceId) => {
+const syncSourceByIdImpl = async (sourceId) => {
   const source = await JobSource.findById(sourceId);
   if (!source) {
     throw new Error("Job source not found");
@@ -433,7 +434,7 @@ export const syncSourceById = async (sourceId) => {
   return result;
 };
 
-export const syncPriorityPuppeteerSources = async (options = {}) => {
+const syncPriorityPuppeteerSourcesImpl = async (options = {}) => {
   const { runPostSyncTasks = true } = options;
   const maxSources = Math.max(
     1,
@@ -549,3 +550,12 @@ const cleanupIneligibleScrapedJobs = async () => {
 
   return removedCount;
 };
+
+// In-process writers drop the cached job catalog when they finish. Writers that run
+// in other processes (GitHub Actions) can't call this, so the catalog also has a TTL.
+export const syncSourcesByMode = withCatalogInvalidation("scrape-sync", syncSourcesByModeImpl);
+export const syncSourceById = withCatalogInvalidation("scrape-sync:source", syncSourceByIdImpl);
+export const syncPriorityPuppeteerSources = withCatalogInvalidation(
+  "scrape-sync:priority-puppeteer",
+  syncPriorityPuppeteerSourcesImpl,
+);

@@ -15,6 +15,7 @@ export {
   clearCatalogCache,
   memoizeOnCatalog,
   memoizeOnCatalogAsync,
+  withCatalogInvalidation,
   createCatalogService,
   filterCatalogByKeyword,
   normalizeKeyword,

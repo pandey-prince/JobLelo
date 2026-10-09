@@ -1,6 +1,7 @@
 import { ScrapedJob } from "../models/scrapedJob.model.js";
 import { classifyLinkCheckResult } from "../utils/deadJobHeuristics.js";
 import { hardDeleteScrapedJob } from "./scrapedJobCleanup.service.js";
+import { withCatalogInvalidation } from "./job-catalog/index.js";
 
 const DEFAULT_HEADERS = {
   "User-Agent":
@@ -144,7 +145,7 @@ export const checkActiveJobLinks = async ({
   return summary;
 };
 
-export const checkAllActiveJobLinks = async () => {
+const checkAllActiveJobLinksImpl = async () => {
   let totalDeleted = 0;
   let totalChecked = 0;
   let batch = 0;
@@ -162,3 +163,8 @@ export const checkAllActiveJobLinks = async () => {
   console.log(`[LinkCheck] Full run: ${JSON.stringify(result)}`);
   return result;
 };
+
+export const checkAllActiveJobLinks = withCatalogInvalidation(
+  "link-check",
+  checkAllActiveJobLinksImpl,
+);

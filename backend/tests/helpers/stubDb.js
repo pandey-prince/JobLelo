@@ -33,6 +33,8 @@ export const stubDb = ({ jobs = [], sources = [], dismissed = {}, profiles = {} 
   const original = {
     scraped: ScrapedJob.find,
     source: JobSource.find,
+    sourceById: JobSource.findById,
+    sourceUpdate: JobSource.findByIdAndUpdate,
     dismissed: DismissedJob.find,
     user: User.findById,
   };
@@ -44,6 +46,11 @@ export const stubDb = ({ jobs = [], sources = [], dismissed = {}, profiles = {} 
   JobSource.find = (query) => {
     calls.jobSourceFind.push(query);
     return chain(sources.filter((source) => matches(source, query)));
+  };
+  JobSource.findById = async (id) => sources.find((source) => String(source._id) === String(id)) || null;
+  JobSource.findByIdAndUpdate = async (id, updates) => {
+    const found = sources.find((source) => String(source._id) === String(id));
+    return found ? { ...found, ...updates } : null;
   };
   DismissedJob.find = (query) => {
     calls.dismissedFind += 1;
@@ -59,6 +66,8 @@ export const stubDb = ({ jobs = [], sources = [], dismissed = {}, profiles = {} 
     restore: () => {
       ScrapedJob.find = original.scraped;
       JobSource.find = original.source;
+      JobSource.findById = original.sourceById;
+      JobSource.findByIdAndUpdate = original.sourceUpdate;
       DismissedJob.find = original.dismissed;
       User.findById = original.user;
     },

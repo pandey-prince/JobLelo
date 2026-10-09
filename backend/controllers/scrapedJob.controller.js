@@ -16,6 +16,7 @@ import { isIndiaJob } from "../utils/indiaJobFilter.js";
 import { createOrGetJobSource } from "../services/careerSource.service.js";
 import {
   getScrapedJobsForList,
+  invalidateCatalog,
   mapScrapedJobForList,
 } from "../services/job-catalog/index.js";
 import { attachBadgesToJob } from "../utils/jobBadges.js";
@@ -137,6 +138,8 @@ export const createJobSource = async (req, res) => {
       triggerSync: isActive !== false,
     });
 
+    invalidateCatalog("source:create");
+
     res.status(created ? 201 : 200).json({
       success: true,
       message: created ? "Career page source added" : "Career page already exists",
@@ -168,6 +171,8 @@ export const updateJobSource = async (req, res) => {
       });
     }
 
+    invalidateCatalog("source:update");
+
     res.status(200).json({
       success: true,
       message: "Job source updated",
@@ -192,6 +197,7 @@ export const deleteJobSource = async (req, res) => {
     }
 
     await hardDeleteScrapedJobsByQuery({ source: source._id }, "source_deleted");
+    invalidateCatalog("source:delete");
 
     res.status(200).json({
       success: true,
