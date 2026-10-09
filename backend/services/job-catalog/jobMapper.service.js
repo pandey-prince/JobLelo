@@ -102,6 +102,14 @@ const JOB_LIST_MAX_DOCS = Math.max(
   Number(process.env.JOB_LIST_MAX_DOCS || 5000) || 5000,
 );
 
+// How much of the (cleaned) description is kept for keyword search.
+const SEARCH_TEXT_DESCRIPTION_CHARS = Math.max(
+  400,
+  Number(process.env.CATALOG_SEARCH_DESCRIPTION_CHARS || 2000) || 2000,
+);
+// Bound the work done cleaning very large HTML descriptions.
+const SEARCH_TEXT_RAW_SLICE = SEARCH_TEXT_DESCRIPTION_CHARS * 3;
+
 const LIST_SELECT =
   "title description location jobType salary requirements applicationUrl companyName companyLogo firstSeenAt status source";
 
@@ -131,30 +139,51 @@ const fetchActiveJobsBatched = async (query) => {
   return jobs;
 };
 
-export const getScrapedJobsForList = async (keyword = "") => {
-  const query = { status: "active" };
+/**
+ * Lower-cased text used for in-memory keyword search. Mirrors what the old DB
+ * regex matched (title, description, location, company) but uses cleaned text
+ * and a bounded description length.
+ */
+export const buildSearchText = (job = {}) =>
+  [
+    job.title,
+    job.companyName,
+    job.location,
+    cleanJobText(String(job.description || "").slice(0, SEARCH_TEXT_RAW_SLICE), {
+      maxLength: SEARCH_TEXT_DESCRIPTION_CHARS,
+    }),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
 
-  if (keyword) {
-    const regex = { $regex: keyword, $options: "i" };
-    query.$or = [
-      { title: regex },
-      { description: regex },
-      { location: regex },
-      { companyName: regex },
-    ];
-  }
+/**
+ * Pure transformation: raw ScrapedJob docs -> the public catalog.
+ * Same pipeline as before (IT filter -> India filter -> dedupe -> map), plus a
+ * parallel `searchIndex` (searchIndex[i] belongs to jobs[i]).
+ */
+export const buildCatalog = (rawJobs = [], hiddenSourceIds = []) => {
+  const hidden = new Set(hiddenSourceIds.map(String));
+  const visible = hidden.size
+    ? rawJobs.filter((job) => !hidden.has(String(job.source)))
+    : rawJobs;
 
-  const [jobs, hiddenSourceIds] = await Promise.all([
-    fetchActiveJobsBatched(query),
+  const kept = dedupeScrapedJobs(filterIndiaJobs(filterItJobs(visible)));
+
+  return {
+    jobs: kept.map(mapScrapedJobForList),
+    searchIndex: kept.map(buildSearchText),
+  };
+};
+
+/** Uncached DB load of the whole public catalog. */
+export const loadCatalogFromDb = async () => {
+  const [rawJobs, hiddenSourceIds] = await Promise.all([
+    fetchActiveJobsBatched({ status: "active" }),
     getPublicFeedHiddenSourceIds(JobSource),
   ]);
 
-  const hidden = new Set(hiddenSourceIds);
-  const visible = hidden.size
-    ? jobs.filter((job) => !hidden.has(String(job.source)))
-    : jobs;
-
-  return dedupeScrapedJobs(filterIndiaJobs(filterItJobs(visible))).map(mapScrapedJobForList);
+  return buildCatalog(rawJobs, hiddenSourceIds);
 };
 
 export const sortJobsByDate = (jobs = []) =>

@@ -264,9 +264,19 @@ export const createDerivedMemo = ({ max = 200, now = () => Date.now() } = {}) =>
   };
 };
 
-/** Recursively freeze plain data so accidental mutation of cached values throws. */
+const isPlainObject = (value) => {
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+};
+
+/**
+ * Recursively freeze plain objects/arrays so accidental mutation of cached
+ * values throws (ESM is strict). Class instances (ObjectId, Date, ...) are left
+ * alone: freezing e.g. a Buffer-backed ObjectId would throw.
+ */
 export const deepFreeze = (value) => {
   if (value === null || typeof value !== "object" || Object.isFrozen(value)) return value;
+  if (!Array.isArray(value) && !isPlainObject(value)) return value;
   Object.freeze(value);
   for (const key of Object.keys(value)) deepFreeze(value[key]);
   return value;
