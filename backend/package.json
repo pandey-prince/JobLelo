@@ -20,7 +20,9 @@
     "seed:admin": "node scripts/seed-admin.js",
     "import:sources": "node scripts/import-career-sources.js",
     "benchmark:catalog": "node scripts/benchmark-catalog.js",
-    "test:cache": "node --test \"tests/**/*.test.js\""
+    "test:cache": "node --test \"tests/**/*.test.js\"",
+    "seed:catalog": "node scripts/seed-local-catalog.js",
+    "test:e2e-cache": "node scripts/e2e-cache.js"
   },
   "keywords": [],
   "author": "",

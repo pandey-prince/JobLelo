@@ -353,6 +353,33 @@ The public job catalog (home, `/jobs`, companies page, stats, recommendations) i
 - **Benchmark:** `npm run benchmark:catalog` (DB pipeline) or `BASE_URL=http://localhost:8000 node scripts/benchmark-catalog.js --http` (endpoints).
 - **Limits:** the cache is per process. If you ever run more than one backend instance, swap the store behind `backend/utils/memoryCache.js` for a shared one (e.g. Redis).
 
+### Try it locally (no scraping needed)
+
+```bash
+# 1. a local MongoDB (any of these)
+docker compose up -d mongo                      # uses the repo's docker-compose.yml
+
+# 2. backend/.env  (copy .env.example and set at least:)
+#    MONGO_URI=mongodb://127.0.0.1:27017/jobvista-local
+#    SECRET_KEY=local-dev-secret
+#    FRONTEND_URL=http://localhost:5173
+#    SCRAPE_ENABLED=false   LINK_CHECK_ENABLED=false
+#    ADMIN_EMAIL=admin@local.test   ADMIN_PASSWORD=Admin#12345
+
+# 3. backend: seed demo companies + 1,500 jobs (refuses non-local databases), then run
+cd backend && npm install
+npm run seed:catalog                  # or: node scripts/seed-local-catalog.js --jobs=5000
+npm run dev                           # http://localhost:8000
+
+# 4. frontend (falls back to http://localhost:8000 in dev)
+cd frontend-codes/frontend && npm install && npm run dev      # http://localhost:5173
+
+# 5. end-to-end cache checks against the running backend
+cd backend && TEST_ADMIN_EMAIL=admin@local.test TEST_ADMIN_PASSWORD='Admin#12345' npm run test:e2e-cache
+```
+
+Admin login is at `/admin/login`; cache status is at `GET /api/v1/admin/cache` (admin cookie required).
+
 ## Tests
 
 ```bash
@@ -360,6 +387,7 @@ cd backend
 npm test                                    # API suite (server running)
 npm run test:integration                    # MongoDB + scrapers (slow)
 npm run test:cache                          # cache unit + controller tests (no DB needed)
+npm run test:e2e-cache                      # live cache behaviour vs a running local backend + local DB
 TEST_API_BASE=http://localhost:8000 node scripts/e2e-test.js
 ```
 
