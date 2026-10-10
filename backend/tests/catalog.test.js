@@ -197,3 +197,35 @@ test("search term helpers: escapeRegex makes special characters literal; sanitiz
   assert.equal(sanitizeSearchTerm(["a", "b"]), "a,b");
   assert.equal(sanitizeSearchTerm("x".repeat(500)).length, MAX_SEARCH_TERM_LENGTH);
 });
+
+test("buildCatalogAsync returns exactly what buildCatalog returns", async () => {
+  const { buildCatalogAsync } = await import("../services/job-catalog/index.js");
+  const docs = fixtures();
+  const hidden = [String(hiddenSource)];
+  const sync = buildCatalog(docs, hidden);
+  const asyncResult = await buildCatalogAsync(docs, hidden, { chunkSize: 1 });
+  assert.deepEqual(JSON.parse(JSON.stringify(asyncResult)), JSON.parse(JSON.stringify(sync)));
+});
+
+test("buildCatalogAsync lets the event loop run during a large rebuild", async () => {
+  const { buildCatalogAsync } = await import("../services/job-catalog/index.js");
+  const docs = Array.from({ length: 1500 }, (_, i) =>
+    raw({ title: `Software Engineer ${i}`, companyName: `Co ${i}`, description: "<p>node react aws</p>".repeat(40) }),
+  );
+
+  let ticks = 0;
+  let building = true;
+  const ticker = (async () => {
+    while (building) {
+      ticks += 1;
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+  })();
+
+  const result = await buildCatalogAsync(docs, [], { chunkSize: 100 });
+  building = false;
+  await ticker;
+
+  assert.equal(result.jobs.length, 1500);
+  assert.ok(ticks >= 10, `event loop served other work during the build (ticks=${ticks})`);
+});

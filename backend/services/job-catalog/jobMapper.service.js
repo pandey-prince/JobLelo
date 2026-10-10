@@ -4,6 +4,8 @@ import { filterItJobs } from "../../utils/itJobFilter.js";
 import { filterIndiaJobs } from "../../utils/indiaJobFilter.js";
 import {
   cleanJobText,
+  decodeHtmlEntities,
+  stripHtmlTags,
   extractExperienceFromTitle,
   resolveExperienceLevel,
 } from "../../utils/jobText.js";
@@ -140,22 +142,38 @@ const fetchActiveJobsBatched = async (query) => {
 };
 
 /**
+ * Cheap HTML -> plain text for the search index. The list mapper already runs the
+ * full (multi-pass) cleaner on every description; doing that twice made catalog
+ * rebuilds ~60% slower, so search text uses at most two bounded passes
+ * (the second one only for double-encoded HTML like "&lt;p&gt;").
+ */
+const toSearchPlainText = (value = "") => {
+  let text = stripHtmlTags(decodeHtmlEntities(String(value).slice(0, SEARCH_TEXT_RAW_SLICE)));
+  if (text.includes("<") || text.includes("&")) {
+    text = stripHtmlTags(decodeHtmlEntities(text));
+  }
+  return text.replace(/\s+/g, " ").trim().slice(0, SEARCH_TEXT_DESCRIPTION_CHARS);
+};
+
+/**
  * Lower-cased text used for in-memory keyword search. Mirrors what the old DB
- * regex matched (title, description, location, company) but uses cleaned text
- * and a bounded description length.
+ * regex matched (title, description, location, company) but uses plain text and a
+ * bounded description length.
  */
 export const buildSearchText = (job = {}) =>
-  [
-    job.title,
-    job.companyName,
-    job.location,
-    cleanJobText(String(job.description || "").slice(0, SEARCH_TEXT_RAW_SLICE), {
-      maxLength: SEARCH_TEXT_DESCRIPTION_CHARS,
-    }),
-  ]
+  [job.title, job.companyName, job.location, toSearchPlainText(job.description)]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
+
+const selectVisibleJobs = (rawJobs = [], hiddenSourceIds = []) => {
+  const hidden = new Set(hiddenSourceIds.map(String));
+  const visible = hidden.size
+    ? rawJobs.filter((job) => !hidden.has(String(job.source)))
+    : rawJobs;
+
+  return dedupeScrapedJobs(filterIndiaJobs(filterItJobs(visible)));
+};
 
 /**
  * Pure transformation: raw ScrapedJob docs -> the public catalog.
@@ -163,17 +181,36 @@ export const buildSearchText = (job = {}) =>
  * parallel `searchIndex` (searchIndex[i] belongs to jobs[i]).
  */
 export const buildCatalog = (rawJobs = [], hiddenSourceIds = []) => {
-  const hidden = new Set(hiddenSourceIds.map(String));
-  const visible = hidden.size
-    ? rawJobs.filter((job) => !hidden.has(String(job.source)))
-    : rawJobs;
-
-  const kept = dedupeScrapedJobs(filterIndiaJobs(filterItJobs(visible)));
+  const kept = selectVisibleJobs(rawJobs, hiddenSourceIds);
 
   return {
-    jobs: kept.map(mapScrapedJobForList),
-    searchIndex: kept.map(buildSearchText),
+    jobs: kept.map((job) => mapScrapedJobForList(job)),
+    searchIndex: kept.map((job) => buildSearchText(job)),
   };
+};
+
+const yieldToEventLoop = () => new Promise((resolve) => setImmediate(resolve));
+
+/**
+ * Same result as buildCatalog, but yields to the event loop between chunks so a
+ * rebuild (~1-2 s of CPU for 5,000 jobs) does not freeze other requests.
+ */
+export const buildCatalogAsync = async (
+  rawJobs = [],
+  hiddenSourceIds = [],
+  { chunkSize = 150 } = {},
+) => {
+  const kept = selectVisibleJobs(rawJobs, hiddenSourceIds);
+  const jobs = [];
+  const searchIndex = [];
+
+  for (let i = 0; i < kept.length; i += 1) {
+    jobs.push(mapScrapedJobForList(kept[i]));
+    searchIndex.push(buildSearchText(kept[i]));
+    if ((i + 1) % chunkSize === 0) await yieldToEventLoop();
+  }
+
+  return { jobs, searchIndex };
 };
 
 /** Uncached DB load of the whole public catalog. */
@@ -183,7 +220,7 @@ export const loadCatalogFromDb = async () => {
     getPublicFeedHiddenSourceIds(JobSource),
   ]);
 
-  return buildCatalog(rawJobs, hiddenSourceIds);
+  return buildCatalogAsync(rawJobs, hiddenSourceIds);
 };
 
 export const sortJobsByDate = (jobs = []) =>

@@ -17,6 +17,9 @@ import mongoose from "mongoose";
 
 dotenv.config();
 
+// Measure production-like behaviour (the dev-only deep-freeze check would skew timings).
+process.env.CATALOG_CACHE_FREEZE = process.env.CATALOG_CACHE_FREEZE || "false";
+
 const RUNS = Math.max(1, Number(process.env.RUNS || 5));
 const args = new Set(process.argv.slice(2));
 

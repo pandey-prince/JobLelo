@@ -3,6 +3,7 @@ export {
   sortJobsByDate,
   dedupeScrapedJobs,
   buildCatalog,
+  buildCatalogAsync,
   loadCatalogFromDb,
   buildSearchText,
 } from "./jobMapper.service.js";
