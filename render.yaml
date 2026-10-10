@@ -38,6 +38,12 @@ services:
         value: 3
       - key: LINK_CHECK_AFTER_SYNC
         value: true
+      - key: CATALOG_CACHE_TTL_MS
+        value: 300000
+      - key: CATALOG_CACHE_STALE_MS
+        value: 1800000
+      - key: EXTERNAL_JOBS_CACHE_TTL_MS
+        value: 1200000
       - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
         value: true
       - key: SKIP_PUPPETEER_SCRAPERS

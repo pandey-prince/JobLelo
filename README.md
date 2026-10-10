@@ -338,12 +338,28 @@ npm run sync:health           # Report; add --report-only to never fail exit cod
 
 After deploy, either wait for the 6h cron or temporarily set `SCRAPE_ON_BOOT=true` in Render and redeploy once.
 
+## Caching
+
+The public job catalog (home, `/jobs`, companies page, stats, recommendations) is cached **in memory** on the backend, so a page load no longer re-reads and re-processes up to 5,000 jobs from MongoDB.
+
+- **What is cached:** the global, user-independent list of visible jobs (IT + India filters, dedupe, mapped for the UI) plus a lower-cased search text per job. Per-user steps (dismissed jobs, profile recommendations, filters, sort, pagination) run *after* the cache, so nothing personal is ever shared.
+- **Freshness:** TTL based (`CATALOG_CACHE_TTL_MS`, default 5 min) with stale-while-revalidate (`CATALOG_CACHE_STALE_MS`, default 30 min), because GitHub Actions scrapers write to MongoDB from other processes. Writers inside the API process (syncs, link check, admin source edits) invalidate the cache when they finish.
+- **Warm-up:** the cache is built in the background on boot; concurrent cold requests share a single DB load.
+- **Keyword search** is plain, case-insensitive text matching against the cached list (no regex), bounded to 100 characters.
+- **Derived data** (public stats, company groups, guest recommendations) is memoised per catalog version.
+- **External jobs** (Remotive/Arbeitnow detail pages) are served from a cached id index instead of re-downloading the whole listing.
+- **Kill switch:** set `CATALOG_CACHE_TTL_MS=0` (and/or `EXTERNAL_JOBS_CACHE_TTL_MS=0`) to bypass caching with no code change.
+- **Admin:** `GET /api/v1/admin/cache` shows hits/misses, age, job count and memory; `POST /api/v1/admin/cache/clear` rebuilds the catalog now.
+- **Benchmark:** `npm run benchmark:catalog` (DB pipeline) or `BASE_URL=http://localhost:8000 node scripts/benchmark-catalog.js --http` (endpoints).
+- **Limits:** the cache is per process. If you ever run more than one backend instance, swap the store behind `backend/utils/memoryCache.js` for a shared one (e.g. Redis).
+
 ## Tests
 
 ```bash
 cd backend
 npm test                                    # API suite (server running)
 npm run test:integration                    # MongoDB + scrapers (slow)
+npm run test:cache                          # cache unit + controller tests (no DB needed)
 TEST_API_BASE=http://localhost:8000 node scripts/e2e-test.js
 ```
 
