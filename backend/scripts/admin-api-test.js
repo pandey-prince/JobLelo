@@ -49,8 +49,17 @@ class CookieClient {
           : options.body,
     });
 
-    const setCookie = response.headers.get("set-cookie");
-    if (setCookie) this.cookie = setCookie.split(";")[0];
+    // Apply every Set-Cookie in order like a browser: the last one wins and an
+    // empty value clears the cookie (login sends "clear old token" then "new token").
+    const setCookies =
+      typeof response.headers.getSetCookie === "function"
+        ? response.headers.getSetCookie()
+        : [response.headers.get("set-cookie")].filter(Boolean);
+    for (const raw of setCookies) {
+      const pair = raw.split(";")[0];
+      const value = pair.slice(pair.indexOf("=") + 1);
+      this.cookie = value ? pair : "";
+    }
 
     const text = await response.text();
     let data = null;
