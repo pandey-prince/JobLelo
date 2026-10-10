@@ -1,5 +1,6 @@
 import { filterItJobs } from "../../utils/itJobFilter.js";
 import { attachBadgesToJob } from "../../utils/jobBadges.js";
+import { createCache, deepFreeze, envMs } from "../../utils/memoryCache.js";
 
 const stripHtml = (value = "") =>
   value.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
@@ -162,35 +163,91 @@ export const fetchExternalJobs = async (keyword = "") => {
   return [...remotiveJobs, ...arbeitnowJobs].slice(0, 14);
 };
 
+/**
+ * Remotive / Arbeitnow only offer "download the whole listing", so looking up one
+ * job used to re-download everything on every call (job detail page, and once per
+ * saved/dismissed external job). We now keep an id -> mapped job index per provider.
+ *
+ * Env:
+ *   EXTERNAL_JOBS_CACHE_TTL_MS    fresh window, default 1200000 (20 min); 0 disables
+ *   EXTERNAL_JOBS_CACHE_STALE_MS  serve-stale limit, default 21600000 (6 h)
+ */
+const externalCache = createCache({
+  name: "external-jobs",
+  ttlMs: () => envMs("EXTERNAL_JOBS_CACHE_TTL_MS", 20 * 60 * 1000),
+  staleMs: () => envMs("EXTERNAL_JOBS_CACHE_STALE_MS", 6 * 60 * 60 * 1000),
+  max: 4,
+});
+
+// If an id is missing from a listing older than this, reload once (new jobs appear between refreshes).
+const MISS_REFRESH_AFTER_MS = 2 * 60 * 1000;
+
+const freezeExternal = (index) => {
+  if (process.env.NODE_ENV !== "production") deepFreeze([...index.values()]);
+  return index;
+};
+
+const loadRemotiveIndex = async () => {
+  const response = await fetch("https://remotive.com/api/remote-jobs");
+  if (!response.ok) throw new Error(`Remotive responded with ${response.status}`);
+  const data = await response.json();
+  const index = new Map();
+  for (const job of data.jobs || []) {
+    const key = String(job.id);
+    if (!index.has(key)) index.set(key, mapRemotiveJob(job)); // first match wins, like Array.find
+  }
+  return freezeExternal(index);
+};
+
+const loadArbeitnowIndex = async () => {
+  const response = await fetch("https://arbeitnow.com/api/job-board-api");
+  if (!response.ok) throw new Error(`Arbeitnow responded with ${response.status}`);
+  const data = await response.json();
+  const index = new Map();
+  for (const job of data.data || []) {
+    const key = String(job.slug);
+    if (!index.has(key)) index.set(key, mapArbeitnowJob(job)); // first match wins, like Array.find
+  }
+  return freezeExternal(index);
+};
+
+const lookupExternalJob = async (cacheKey, loader, id) => {
+  try {
+    let entry = await externalCache.getOrLoadEntry(cacheKey, loader);
+    let job = entry.value.get(id);
+
+    const cachedAndOld =
+      entry.state !== "miss" &&
+      entry.state !== "bypass" &&
+      Date.now() - entry.builtAt > MISS_REFRESH_AFTER_MS;
+
+    if (!job && cachedAndOld) {
+      externalCache.invalidate(cacheKey);
+      entry = await externalCache.getOrLoadEntry(cacheKey, loader);
+      job = entry.value.get(id);
+    }
+
+    // Shallow copy: callers get their own top-level object.
+    return job ? { ...job } : null;
+  } catch {
+    return null;
+  }
+};
+
 export const fetchExternalJobById = async (jobId) => {
   if (jobId.startsWith("remotive-")) {
-    const remoteId = jobId.replace("remotive-", "");
-    try {
-      const response = await fetch("https://remotive.com/api/remote-jobs");
-      if (!response.ok) return null;
-      const data = await response.json();
-      const job = (data.jobs || []).find((item) => String(item.id) === remoteId);
-      return job ? mapRemotiveJob(job) : null;
-    } catch {
-      return null;
-    }
+    return lookupExternalJob("remotive", loadRemotiveIndex, jobId.replace("remotive-", ""));
   }
 
   if (jobId.startsWith("arbeitnow-")) {
-    const slug = jobId.replace("arbeitnow-", "");
-    try {
-      const response = await fetch("https://arbeitnow.com/api/job-board-api");
-      if (!response.ok) return null;
-      const data = await response.json();
-      const job = (data.data || []).find((item) => item.slug === slug);
-      return job ? mapArbeitnowJob(job) : null;
-    } catch {
-      return null;
-    }
+    return lookupExternalJob("arbeitnow", loadArbeitnowIndex, jobId.replace("arbeitnow-", ""));
   }
 
   return null;
 };
+
+export const getExternalCacheStats = () => externalCache.getStats();
+export const clearExternalCache = () => externalCache.clear();
 
 export const isExternalJobId = (jobId = "") =>
   jobId.startsWith("remotive-") || jobId.startsWith("arbeitnow-");

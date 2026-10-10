@@ -27,4 +27,6 @@ export {
   mapRemotiveJob,
   mapArbeitnowJob,
   isExternalJobId,
+  getExternalCacheStats,
+  clearExternalCache,
 } from "./externalJobs.service.js";
