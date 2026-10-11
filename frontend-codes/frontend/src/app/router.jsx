@@ -13,6 +13,7 @@ import CompanyLists from "@/components/CompanyLists";
 import SavedJobs from "@/components/SavedJobs";
 import HiddenJobs from "@/components/HiddenJobs";
 import JobAlerts from "@/components/JobAlerts";
+import NotFound from "@/components/NotFound";
 import AuthRoute from "@/components/shared/AuthRoute";
 import AdminLogin from "@/components/admin/AdminLogin";
 import AdminLayout from "@/components/admin/AdminLayout";
@@ -66,6 +67,8 @@ export const appRouter = createBrowserRouter([
           </AuthRoute>
         ),
       },
+      // Catch-all: any URL that matches nothing above shows the 404 page.
+      { path: "*", element: <NotFound /> },
     ],
   },
   { path: "/admin/login", element: <AdminLogin /> },
